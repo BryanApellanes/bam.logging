@@ -2,9 +2,10 @@
 	Copyright © Bryan Apellanes 2015  
 */
 using System.IO;
-using Bam.Net.Configuration;
+using Bam.Configuration;
+using Bam;
 
-namespace Bam.Net.Logging
+namespace Bam.Logging
 {
     /// <summary>
     /// A logger used to log events to a text file

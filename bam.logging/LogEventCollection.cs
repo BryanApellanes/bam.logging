@@ -9,7 +9,7 @@ using System.Text;
 using System.Runtime.Serialization;
 using System.Xml.Serialization;
 
-namespace Bam.Net.Logging
+namespace Bam.Logging
 {
     /// <summary>
     /// Represents a collection of LogEvents that can be persisted to a file.

@@ -6,10 +6,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace Bam.Net.Logging
+namespace Bam.Logging
 {
     /// <summary>
-    /// The Bam.Net.Logging namespace contains classes, interfaces and value types used to aide
+    /// The Bam.Logging namespace contains classes, interfaces and value types used to aide
     /// in log management.
     /// </summary>
     [System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
