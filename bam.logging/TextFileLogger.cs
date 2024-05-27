@@ -20,7 +20,7 @@ namespace Bam.Net.Logging
             _fileNumber = 1;
             MaxBytes = 1048576; // 1 MB
             FileExtension = "log";
-            Folder = new DirectoryInfo(GetAppDataFolder());            
+            Folder = new DirectoryInfo(GetProfileDataFolder());            
         }
 
 
@@ -63,7 +63,7 @@ namespace Bam.Net.Logging
         {
             get
             {
-                return _folderLock.DoubleCheckLock(ref _folder, () => new DirectoryInfo(GetAppDataFolder()));
+                return _folderLock.DoubleCheckLock(ref _folder, () => new DirectoryInfo(GetProfileDataFolder()));
             }
             set
             {
@@ -150,16 +150,10 @@ namespace Bam.Net.Logging
                 }
             }
         }
-
-        /// <summary>
-        /// Gets the path to the current user's AppData folder. If
-        /// this is run in a Web app (HttpContext.Current isn't null)
-        /// then the full path to ~/AppData/ is returned. 
-        /// </summary>
-        protected static string GetAppDataFolder()
+        
+        protected static string GetProfileDataFolder()
         {
-            return BamHome.GetAppDataPath();
-            //return RuntimeSettings.ProcessDataFolder;
+            return BamProfile.DataPath;
         }
     }
 }
