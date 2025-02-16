@@ -1,9 +1,6 @@
 /*
 	Copyright © Bryan Apellanes 2015  
 */
-using System.IO;
-using Bam.Configuration;
-using Bam;
 
 namespace Bam.Logging
 {
