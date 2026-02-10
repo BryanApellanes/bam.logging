@@ -15,24 +15,22 @@ public class LoggableShould : UnitTestMenuContainer
         string received = null;
         When.A<Loggable>("Uses Fire() to fire a generic event", () => new TestLoggable(), (testLoggable) =>
         {
-            testLoggable.ShouldBeOfType<TestLoggable>();
             TestLoggable loggable = (TestLoggable)testLoggable;
             loggable.TestEvent += (o, args) =>
             {
                 called = true;
-                args.Value.ShouldBe(expected);
                 received = args.Value;
             };
             loggable.TestFire(new TestEventArgs(){Value = expected});
-            return loggable;
+            return new object[] { testLoggable is TestLoggable, received };
         })
         .It
         .ShouldPass(because =>
         {
-            TestLoggable loggable = because.ObjectUnderTest<TestLoggable>();
-            because.TheObjectUnderTest.IsObjectOfType<TestLoggable>();
+            object[] r = (object[])because.Result;
+            because.ItsTrue("object under test is TestLoggable", (bool)r[0]);
             because.ItsTrue("The event was called", called.Value);
-            because.ItsTrue($"Received value was {expected} as expected", received.Equals(expected));
+            because.ItsTrue($"Received value was {expected} as expected", expected.Equals(r[1]));
         })
         .SoBeHappy()
         .UnlessItFailed();
