@@ -11,6 +11,10 @@ namespace Bam.Logging
     {
         int _fileNumber;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="TextFileLogger"/> class with a 1 MB default max file size.
+        /// </summary>
+        /// <param name="applicationNameProvider">Provides the application name used in log file naming.</param>
         public TextFileLogger(IApplicationNameProvider applicationNameProvider)
             : base()
         {
@@ -92,7 +96,7 @@ namespace Bam.Logging
         /// Writes the specified logEvent to the file referenced by the File property
         /// of the current TextFileLogger.
         /// </summary>
-        /// <param name="logEvent"></param>
+        /// <param name="logEvent">The log event to write to the file.</param>
         public override void CommitLogEvent(LogEvent logEvent)
         {
             string logText = GetLogText(logEvent);

@@ -27,7 +27,7 @@ namespace Bam.Logging
         /// the specified logger is the current MultiTargetLogger it will not be added.
         /// If the specified logger is a NullLoger or another MultiTargetLogger it will not be added.
         /// </summary>
-        /// <param name="logger"></param>
+        /// <param name="logger">The logger to add. Null values, this instance, and other MultiTargetLogger instances are ignored.</param>
         public void AddLogger(ILogger logger)
         {
             if (logger == null)
@@ -54,6 +54,10 @@ namespace Bam.Logging
             }
         }
 
+        /// <summary>
+        /// Stops all child logger threads and starts a new logging thread for this MultiTargetLogger.
+        /// </summary>
+        /// <returns>This logger instance.</returns>
         public override ILogger StartLoggingThread()
         {
             foreach(ILogger logger in Loggers)
@@ -67,7 +71,7 @@ namespace Bam.Logging
         /// Passes the specified logEvent to the Commit method
         /// of each of the ILoggers in Loggers.
         /// </summary>
-        /// <param name="logEvent"></param>
+        /// <param name="logEvent">The log event to commit to all child loggers.</param>
         public override void CommitLogEvent(LogEvent logEvent)
         {
             Parallel.ForEach(Loggers, (logger) => logger.CommitLogEvent(logEvent));
