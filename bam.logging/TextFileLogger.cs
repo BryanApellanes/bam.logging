@@ -56,7 +56,7 @@ namespace Bam.Logging
             }
         }
 
-        DirectoryInfo _folder;
+        DirectoryInfo _folder = null!;
         object _folderLock = new object();
         /// <summary>
         /// Gets or sets the directory where logs are written.
@@ -79,7 +79,7 @@ namespace Bam.Logging
             }
         }
 
-        FileInfo _file;
+        FileInfo _file = null!;
         /// <summary>
         /// Gets the FileInfo representing the current log.  This will change as the file reaches 
         /// the max size or entries per file for XmlLogger.
