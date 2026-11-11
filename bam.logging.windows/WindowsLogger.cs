@@ -6,14 +6,18 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Diagnostics;
+using System.Runtime.Versioning;
 using Bam.Logging;
 
 namespace Bam.Logging
 {
     /// <summary>
     /// A LoggerBase implementation that commits logs to the 
-    /// Windows event viewer.
+    /// Windows event viewer. The event log exists only on Windows, so the type is marked
+    /// <see cref="SupportedOSPlatformAttribute"/> "windows": callers on other platforms get CA1416
+    /// at compile time instead of a <see cref="PlatformNotSupportedException"/> at run time.
     /// </summary>
+    [SupportedOSPlatform("windows")]
     public class WindowsLogger : Logger
     {
         public WindowsLogger()
