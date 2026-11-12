@@ -14,8 +14,8 @@ namespace Bam.Logging
     /// <summary>
     /// A LoggerBase implementation that commits logs to the 
     /// Windows event viewer. The event log exists only on Windows, so the type is marked
-    /// <see cref="SupportedOSPlatformAttribute"/> "windows": callers on other platforms get CA1416
-    /// at compile time instead of a <see cref="PlatformNotSupportedException"/> at run time.
+    /// <see cref="SupportedOSPlatformAttribute"/> "windows": callers not themselves marked windows-only
+    /// get CA1416 at compile time. Loggers created by name through <c>Log.CreateLogger</c> are not checked.
     /// </summary>
     [SupportedOSPlatform("windows")]
     public class WindowsLogger : Logger
