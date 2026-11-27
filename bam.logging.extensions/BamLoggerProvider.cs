@@ -17,7 +17,16 @@ namespace Bam.Logging.Extensions;
 /// <item>control characters are neutralised, so log text can't forge a record;</item>
 /// <item>an exception is attached.</item>
 /// </list>
+/// <para>
+/// Exception text: <c>bam.base</c> already escapes control characters in an exception's message (outer and inner)
+/// when it builds the event; the stack trace is recorded as .NET produces it, one frame per line, which is its format.
+/// </para>
+/// <para>
+/// Scope values are written as <c>key=value</c> without quoting. A value can therefore read like a second pair
+/// (<c>User=bob Admin=true</c>), but it can't start a new record. Treat scope text as data, not as parsed fields.
+/// </para>
 /// </summary>
+[ProviderAlias("Bam")]
 public sealed class BamLoggerProvider : Microsoft.Extensions.Logging.ILoggerProvider, ISupportExternalScope
 {
     /// <summary>The Bam message signature the provider writes with; the formatted MEL text is its only value.</summary>
@@ -140,7 +149,17 @@ public sealed class BamLoggerProvider : Microsoft.Extensions.Logging.ILoggerProv
         return Neutralise(text.ToString());
     }
 
-    /// <summary>Replaces control characters: CR and LF become the visible <c>\r</c> and <c>\n</c>, tab a space, others <c>?</c>.</summary>
+    /// <summary>
+    /// Replaces characters that could break or disguise a record:
+    /// <list type="bullet">
+    /// <item>CR and LF become the visible <c>\r</c> and <c>\n</c>;</item>
+    /// <item>the Unicode line and paragraph separators (U+2028, U+2029) become <c>\u2028</c> and <c>\u2029</c>, since
+    /// some viewers break lines on them;</item>
+    /// <item>tab becomes a space;</item>
+    /// <item>every other control character, and the bidirectional formatting controls (U+061C, U+200E, U+200F,
+    /// U+202A–U+202E, U+2066–U+2069) that can make a line display differently from what it holds, become <c>?</c>.</item>
+    /// </list>
+    /// </summary>
     /// <param name="value">The text.</param>
     public static string Neutralise(string value)
     {
@@ -149,7 +168,7 @@ public sealed class BamLoggerProvider : Microsoft.Extensions.Logging.ILoggerProv
         for (int index = 0; index < value.Length; index++)
         {
             char character = value[index];
-            if (!char.IsControl(character))
+            if (!IsUnsafe(character))
             {
                 clean?.Append(character);
                 continue;
@@ -159,11 +178,21 @@ public sealed class BamLoggerProvider : Microsoft.Extensions.Logging.ILoggerProv
             {
                 '\r' => "\\r",
                 '\n' => "\\n",
+                '\u2028' => "\\u2028",
+                '\u2029' => "\\u2029",
                 '\t' => " ",
                 _ => "?",
             });
         }
         return clean?.ToString() ?? value;
+    }
+
+    private static bool IsUnsafe(char character)
+    {
+        return char.IsControl(character)
+            || character is '\u2028' or '\u2029' or '\u061C' or '\u200E' or '\u200F'
+            || character is >= '\u202A' and <= '\u202E'
+            || character is >= '\u2066' and <= '\u2069';
     }
 
     private void Write(string category, LogLevel level, EventId eventId, string formatted, Exception? exception)
@@ -209,7 +238,8 @@ public sealed class BamLoggerProvider : Microsoft.Extensions.Logging.ILoggerProv
                 return;
             }
             ArgumentNullException.ThrowIfNull(formatter);
-            _provider.Write(_category, logLevel, eventId, formatter(state, exception), exception);
+            // MEL's own providers tolerate a formatter that returns null; so does this one.
+            _provider.Write(_category, logLevel, eventId, formatter(state, exception) ?? string.Empty, exception);
         }
     }
 }

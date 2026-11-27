@@ -66,7 +66,8 @@ public class BamLoggerProviderShould
                 BamLoggerProvider.Map(LogLevel.Critical),
                 BamLoggerProvider.Neutralise(text),
                 BamLoggerProvider.Neutralise("clean") == "clean",
-                BamLoggerProvider.Compose("Cat", "msg", new EventId(42), null)))
+                BamLoggerProvider.Compose("Cat", "msg", new EventId(42), null),
+                BamLoggerProvider.Neutralise("x\u2028y\u2029z\u202Ea\u2066b\u200Fc\u061Cd")))
             .TheTest
             .ShouldPass<MappingOutcome>((because, outcome) =>
             {
@@ -77,8 +78,46 @@ public class BamLoggerProviderShould
                 because.ItsTrue("error is Error", outcome.Error == BamLogEventType.Error);
                 because.ItsTrue("critical is Fatal", outcome.Critical == BamLogEventType.Fatal);
                 because.ItsTrue($"tab becomes a space, other controls '?', CR and LF visible ({outcome.Neutralised})", outcome.Neutralised == "a b?c\\r\\nd");
+                because.ItsTrue($"U+2028 and U+2029 become visible, bidi controls '?' ({outcome.Unicode})", outcome.Unicode == "x\\u2028y\\u2029z?a?b?c?d");
                 because.ItsTrue("clean text passes unchanged", outcome.CleanUnchanged);
                 because.ItsTrue($"a non-zero event id is appended ({outcome.Composed})", outcome.Composed == "[Cat] msg eventId=42");
+            })
+            .SoBeHappy()
+            .UnlessItFailed();
+    }
+
+    [UnitTest]
+    public void KeepTheLevelOfEntriesWithExceptionsAndWriteEveryScopeShape()
+    {
+        When.A<RecordingBamLogger>("forwards exceptions at their own level, every scope shape and a null formatter",
+            () => new RecordingBamLogger(),
+            target =>
+            {
+                using ILoggerFactory factory = LoggerFactory.Create(logging => logging.AddProvider(new BamLoggerProvider(target, LogLevel.Information, ownsTarget: false)));
+                Microsoft.Extensions.Logging.ILogger logger = factory.CreateLogger("Cat");
+                logger.LogCritical(new InvalidOperationException("critical-boom"), "critical");
+                logger.LogWarning(new InvalidOperationException("warning-boom"), "warning");
+                using (logger.BeginScope("Req {Id}", 5))
+                using (logger.BeginScope("plain-scope"))
+                {
+                    logger.LogInformation("scoped");
+                }
+                logger.Log<string>(LogLevel.Information, new EventId(0), "state", null, (state, exception) => null!);
+                List<Recorded> entries = target.WaitFor(4).ToList();
+                target.StopLoggingThread();
+                return new BridgeOutcome(entries);
+            })
+            .TheTest
+            .ShouldPass<BridgeOutcome>((because, outcome) =>
+            {
+                because.ItsTrue($"four entries forwarded ({outcome.Entries.Count})", outcome.Entries.Count == 4);
+                because.ItsTrue("critical with an exception stays Fatal", outcome.Entries[0].Type == BamLogEventType.Fatal);
+                because.ItsTrue("and carries the exception message", outcome.Entries[0].Message.Contains("critical-boom", StringComparison.Ordinal));
+                because.ItsTrue("warning with an exception stays Warning", outcome.Entries[1].Type == BamLogEventType.Warning);
+                because.ItsTrue($"a message-template scope writes its values ({outcome.Entries[2].Text})", outcome.Entries[2].Text.Contains(" Id=5", StringComparison.Ordinal));
+                because.ItsFalse("and leaves out {OriginalFormat}", outcome.Entries[2].Text.Contains("OriginalFormat", StringComparison.Ordinal));
+                because.ItsTrue("a plain string scope is appended as is", outcome.Entries[2].Text.EndsWith(" plain-scope", StringComparison.Ordinal));
+                because.ItsTrue($"a formatter returning null writes an empty message ({outcome.Entries[3].Text})", outcome.Entries[3].Text == "[Cat] ");
             })
             .SoBeHappy()
             .UnlessItFailed();
@@ -97,12 +136,13 @@ public class BamLoggerProviderShould
                 logger.LogInformation("path {Path}", "/nope\r\n****************\r\nSource: forged");
                 List<Recorded> entries = target.WaitFor(2).ToList();
                 target.StopLoggingThread();
-                return new TextOutcome(entries[0].Text, entries[1].Text, entries[1].Message);
+                return new TextOutcome(entries[0].Text, entries[0].Message, entries[1].Text, entries[1].Message);
             })
             .TheTest
             .ShouldPass<TextOutcome>((because, outcome) =>
             {
                 because.ItsTrue("braces round-trip unchanged", outcome.Braces == "[Cat] route /api/{**catch-all} body {\"a\":1}");
+                because.ItsTrue($"and the committed message ends with them unchanged ({outcome.BracesMessage})", outcome.BracesMessage.EndsWith("[Cat] route /api/{**catch-all} body {\"a\":1}", StringComparison.Ordinal));
                 because.ItsFalse("no raw CR or LF reaches the Bam entry", outcome.LineBreakText.Contains('\r') || outcome.LineBreakText.Contains('\n'));
                 because.ItsTrue("the line breaks are visible instead", outcome.LineBreakText.Contains("\\r\\n****************\\r\\nSource: forged", StringComparison.Ordinal));
                 because.ItsFalse("the committed message holds no forged record separator line", outcome.LineBreakMessage.Contains("\n****************", StringComparison.Ordinal));
@@ -393,9 +433,9 @@ public class BamLoggerProviderShould
 
     private sealed record BridgeOutcome(List<Recorded> Entries);
 
-    private sealed record MappingOutcome(BamLogEventType Trace, BamLogEventType Debug, BamLogEventType Information, BamLogEventType Warning, BamLogEventType Error, BamLogEventType Critical, string Neutralised, bool CleanUnchanged, string Composed);
+    private sealed record MappingOutcome(BamLogEventType Trace, BamLogEventType Debug, BamLogEventType Information, BamLogEventType Warning, BamLogEventType Error, BamLogEventType Critical, string Neutralised, bool CleanUnchanged, string Composed, string Unicode);
 
-    private sealed record TextOutcome(string Braces, string LineBreakText, string LineBreakMessage);
+    private sealed record TextOutcome(string Braces, string BracesMessage, string LineBreakText, string LineBreakMessage);
 
     private sealed record DropOutcome(long Dropped, long Observed, string? Refusal);
 
