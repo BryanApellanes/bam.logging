@@ -1,0 +1,215 @@
+using System.Diagnostics.Metrics;
+using System.Text;
+using Microsoft.Extensions.Logging;
+using BamLogEventType = Bam.Logging.LogEventType;
+using IBamLogger = Bam.Logging.ILogger;
+
+namespace Bam.Logging.Extensions;
+
+/// <summary>
+/// Bridges Microsoft.Extensions.Logging into Bam's logging, so Bam sinks (text file, console, or both through a
+/// multi-target logger) receive everything a host, ASP.NET Core and its libraries log. Each MEL entry becomes one Bam
+/// log event:
+/// <list type="bullet">
+/// <item>the level is mapped onto <see cref="BamLogEventType"/>. Bam has no Debug or Trace; they are forwarded as
+/// Information when they pass the configured minimum;</item>
+/// <item>the message is prefixed with the category, and the active scopes are appended;</item>
+/// <item>control characters are neutralised, so log text can't forge a record;</item>
+/// <item>an exception is attached.</item>
+/// </list>
+/// </summary>
+public sealed class BamLoggerProvider : Microsoft.Extensions.Logging.ILoggerProvider, ISupportExternalScope
+{
+    /// <summary>The Bam message signature the provider writes with; the formatted MEL text is its only value.</summary>
+    public const string MessageSignature = "{0}";
+
+    private readonly IBamLogger _target;
+    private readonly Meter _meter;
+    private readonly LogLevel _minimum;
+    private readonly bool _ownsTarget;
+    private IExternalScopeProvider? _scopes;
+
+    /// <summary>Creates the provider over a Bam logger.</summary>
+    /// <param name="target">The Bam logger that receives entries.</param>
+    /// <param name="minimum">The minimum MEL level forwarded.</param>
+    /// <param name="ownsTarget">Whether disposing the provider stops the Bam logger's thread.</param>
+    /// <param name="meterName">The meter that carries the dropped-entries counter.</param>
+    /// <param name="droppedEventsInstrument">The dropped-entries counter's name.</param>
+    public BamLoggerProvider(
+        IBamLogger target,
+        LogLevel minimum = LogLevel.Information,
+        bool ownsTarget = true,
+        string meterName = BamLoggingBridgeOptions.DefaultMeterName,
+        string droppedEventsInstrument = BamLoggingBridgeOptions.DefaultDroppedEventsInstrument)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentException.ThrowIfNullOrWhiteSpace(meterName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(droppedEventsInstrument);
+        _target = target;
+        _minimum = minimum;
+        _ownsTarget = ownsTarget;
+        DroppedEventsInstrument = droppedEventsInstrument;
+        // The provider owns its meter, so the counter goes away with it. A host passes its own meter name to export the
+        // counter wherever its other metrics go.
+        _meter = new Meter(meterName);
+        _meter.CreateObservableCounter(droppedEventsInstrument, () => DroppedEventCount, "{event}",
+            "Log entries the Bam logging bridge dropped because its queue was full.");
+    }
+
+    /// <summary>The name of the dropped-entries counter this provider publishes.</summary>
+    public string DroppedEventsInstrument { get; }
+
+    /// <summary>Entries the Bam logger has dropped because its queue was full; zero for a logger without a bound.</summary>
+    public long DroppedEventCount => _target is Logger bounded ? bounded.DroppedEventCount : 0;
+
+    /// <summary>The Bam logger entries are forwarded to.</summary>
+    public IBamLogger Target => _target;
+
+    /// <inheritdoc />
+    public Microsoft.Extensions.Logging.ILogger CreateLogger(string categoryName)
+    {
+        return new BridgeLogger(this, categoryName);
+    }
+
+    /// <inheritdoc />
+    public void SetScopeProvider(IExternalScopeProvider scopeProvider)
+    {
+        _scopes = scopeProvider;
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _meter.Dispose();
+        if (_ownsTarget)
+        {
+            _target.StopLoggingThread();
+        }
+    }
+
+    /// <summary>Maps a MEL level onto Bam's event types.</summary>
+    /// <param name="level">The MEL level.</param>
+    public static BamLogEventType Map(LogLevel level)
+    {
+        return level switch
+        {
+            LogLevel.Critical => BamLogEventType.Fatal,
+            LogLevel.Error => BamLogEventType.Error,
+            LogLevel.Warning => BamLogEventType.Warning,
+            _ => BamLogEventType.Information,
+        };
+    }
+
+    /// <summary>
+    /// Builds the line the bridge hands to Bam: <c>[category] message</c>, the event id, and every scope value.
+    /// Control characters are replaced (CR and LF as the visible <c>\r</c> and <c>\n</c>), because Bam's text sink
+    /// separates records with lines and every library's log text passes through here; a request path or header
+    /// value carrying CR or LF must not be able to write a forged record.
+    /// </summary>
+    /// <param name="category">The MEL category.</param>
+    /// <param name="formatted">The MEL-formatted message.</param>
+    /// <param name="eventId">The MEL event id.</param>
+    /// <param name="scopes">The scope provider, if any.</param>
+    public static string Compose(string category, string formatted, EventId eventId, IExternalScopeProvider? scopes)
+    {
+        ArgumentNullException.ThrowIfNull(category);
+        ArgumentNullException.ThrowIfNull(formatted);
+        StringBuilder text = new StringBuilder(formatted.Length + category.Length + 64);
+        text.Append('[').Append(category).Append("] ").Append(formatted);
+        if (eventId.Id != 0)
+        {
+            text.Append(" eventId=").Append(eventId.Id);
+        }
+        scopes?.ForEachScope(static (scope, builder) =>
+        {
+            if (scope is IEnumerable<KeyValuePair<string, object?>> pairs)
+            {
+                foreach (KeyValuePair<string, object?> pair in pairs)
+                {
+                    if (pair.Key != "{OriginalFormat}")
+                    {
+                        builder.Append(' ').Append(pair.Key).Append('=').Append(pair.Value);
+                    }
+                }
+            }
+            else if (scope is not null)
+            {
+                builder.Append(' ').Append(scope);
+            }
+        }, text);
+        return Neutralise(text.ToString());
+    }
+
+    /// <summary>Replaces control characters: CR and LF become the visible <c>\r</c> and <c>\n</c>, tab a space, others <c>?</c>.</summary>
+    /// <param name="value">The text.</param>
+    public static string Neutralise(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        StringBuilder? clean = null;
+        for (int index = 0; index < value.Length; index++)
+        {
+            char character = value[index];
+            if (!char.IsControl(character))
+            {
+                clean?.Append(character);
+                continue;
+            }
+            clean ??= new StringBuilder(value.Length + 8).Append(value, 0, index);
+            clean.Append(character switch
+            {
+                '\r' => "\\r",
+                '\n' => "\\n",
+                '\t' => " ",
+                _ => "?",
+            });
+        }
+        return clean?.ToString() ?? value;
+    }
+
+    private void Write(string category, LogLevel level, EventId eventId, string formatted, Exception? exception)
+    {
+        // Bam formats the signature with string.Format only when values are passed, so the text goes in as the
+        // single value of a "{0}" signature: braces in log content arrive unchanged, never doubled or interpreted.
+        string line = Compose(category, formatted, eventId, _scopes);
+        if (exception is not null)
+        {
+            _target.AddEntry(MessageSignature, (int)Map(level), exception, line);
+        }
+        else
+        {
+            _target.AddEntry(MessageSignature, Map(level), line);
+        }
+    }
+
+    private sealed class BridgeLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        private readonly BamLoggerProvider _provider;
+        private readonly string _category;
+
+        public BridgeLogger(BamLoggerProvider provider, string category)
+        {
+            _provider = provider;
+            _category = category;
+        }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+        {
+            return _provider._scopes?.Push(state);
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return logLevel != LogLevel.None && logLevel >= _provider._minimum;
+        }
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (!IsEnabled(logLevel))
+            {
+                return;
+            }
+            ArgumentNullException.ThrowIfNull(formatter);
+            _provider.Write(_category, logLevel, eventId, formatter(state, exception), exception);
+        }
+    }
+}

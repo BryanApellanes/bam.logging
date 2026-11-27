@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The Microsoft.Extensions.Logging bridge for Bam loggers. It is a separate project, like bam.logging.windows, so the
+    core bam.logging library takes no Microsoft.Extensions dependency. Hosts that log through MEL (ASP.NET Core, the
+    generic host) reference this project and call AddBamLogging.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Bam</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\bam.logging\bam.logging.csproj" />
+  </ItemGroup>
+
+</Project>
